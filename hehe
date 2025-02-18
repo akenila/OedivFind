@@ -1,4 +1,4 @@
-def video_to_hashes(video_path, frame_interval=30):
+def video_to_hashes(video_path, frame_interval=20):
     cap = cv2.VideoCapture(video_path)
     frame_hashes = []
     frame_count = 0
@@ -18,7 +18,7 @@ def video_to_hashes(video_path, frame_interval=30):
     cap.release()
     return frame_hashes
 
-def compare_hashes(hashes1, hashes2, threshold=5):
+def compare_hashes(hashes1, hashes2, threshold=20):
     matches = 0
     for h1 in hashes1:
         for h2 in hashes2:
