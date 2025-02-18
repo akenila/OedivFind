@@ -63,10 +63,10 @@ def select_folder():
     folder_path = filedialog.askdirectory()
     return folder_path
 
-def select_file(filetypes):
+def select_file(filetypes, title):
     root = tk.Tk()
     root.withdraw()
-    file_path = filedialog.askopenfilename(filetypes=filetypes)
+    file_path = filedialog.askopenfilename(filetypes=filetypes, title=title)
     return file_path
 
 def main_menu():
@@ -100,8 +100,8 @@ def main_menu():
                 print('')
 
         elif choice == '2':
-            hash_file = select_file(filetypes=[("JSON files", "*.json")])
-            new_video_path = select_file(filetypes=[("Video files", "*.mp4 *.avi *.mkv")])
+            hash_file = select_file(filetypes=[("JSON files", "*.json")], title="Select the hash file")
+            new_video_path = select_file(filetypes=[("Video files", "*.mp4 *.avi *.mkv")], title="Select the new video")
             original_video = find_original_video(new_video_path, hash_file)
             if original_video:
                 print(f'\033[92mThe original video is: {original_video}\033[0m')
