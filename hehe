@@ -69,7 +69,9 @@ def select_file(filetypes, title):
     file_path = filedialog.askopenfilename(filetypes=filetypes, title=title)
     return file_path
 
+hash_file = ""
 def main_menu():
+    global hash_file
     while True:
         print("Menu:")
         print("1. Scan folder and save hashes")
@@ -100,7 +102,22 @@ def main_menu():
                 print('')
 
         elif choice == '2':
-            hash_file = select_file(filetypes=[("JSON files", "*.json")], title="Select the hash file")
+            while True:
+                print("Select the hash file and the new video to find the original video.")
+                print("1. Select the hash file")
+                print("2. Use the hash file from the previous step")
+                choice = input("Enter your choice: ")
+                if choice == '1':
+                    hash_file = select_file(filetypes=[("JSON files", "*.json")], title="Select the hash file")
+                    break
+                elif choice == '2':
+                    if not hash_file:
+                        print("\033[91mHash file not found. Please scan a folder first.\033[0m")
+                        continue
+                    break
+                else:
+                    print("Invalid choice. Please try again.")
+                    continue
             new_video_path = select_file(filetypes=[("Video files", "*.mp4 *.avi *.mkv")], title="Select the new video")
             original_video = find_original_video(new_video_path, hash_file)
             if original_video:
