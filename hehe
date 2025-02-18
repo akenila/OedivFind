@@ -1,0 +1,117 @@
+def video_to_hashes(video_path, frame_interval=30):
+    cap = cv2.VideoCapture(video_path)
+    frame_hashes = []
+    frame_count = 0
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if frame_count % frame_interval == 0:
+            pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            frame_hash = imagehash.phash(pil_image)
+            frame_hashes.append(str(frame_hash))
+
+        frame_count += 1
+
+    cap.release()
+    return frame_hashes
+
+def compare_hashes(hashes1, hashes2, threshold=5):
+    matches = 0
+    for h1 in hashes1:
+        for h2 in hashes2:
+            if abs(int(h1, 16) - int(h2, 16)) < threshold:
+                matches += 1
+                break
+    return matches
+
+def save_hashes(folder_path, hash_file):
+    video_hashes = {}
+    video_files = [f for f in os.listdir(folder_path) if f.endswith(('.mp4', '.avi', '.mkv'))]
+    for filename in tqdm(video_files, desc="Processing videos"):
+        video_path = os.path.join(folder_path, filename)
+        video_hashes[video_path] = video_to_hashes(video_path)
+    with open(hash_file, 'w') as f:
+        json.dump(video_hashes, f)
+
+def load_hashes(hash_file):
+    with open(hash_file, 'r') as f:
+        return json.load(f)
+
+def find_original_video(new_video_path, hash_file):
+    new_video_hashes = video_to_hashes(new_video_path)
+    print(f'Hashes of the new video: {new_video_hashes}')
+    video_hashes = load_hashes(hash_file)
+
+    best_match = None
+    best_match_count = 0
+
+    for video_path, hashes in video_hashes.items():
+        print(f'Comparing {new_video_path} with {video_path}...')
+        match_count = compare_hashes(new_video_hashes, hashes)
+        if match_count > best_match_count:
+            best_match_count = match_count
+            best_match = video_path
+
+    return best_match
+
+def select_folder():
+    root = tk.Tk()
+    root.withdraw()
+    folder_path = filedialog.askdirectory()
+    return folder_path
+
+def select_file(filetypes):
+    root = tk.Tk()
+    root.withdraw()
+    file_path = filedialog.askopenfilename(filetypes=filetypes)
+    return file_path
+
+def main_menu():
+    while True:
+        print("Menu:")
+        print("1. Scan folder and save hashes")
+        print("2. Find original video")
+        print("3. Exit")
+        choice = input("Enter your choice: ")
+
+        if choice == '1':
+            folder_path = select_folder()
+            hash_file = input("Enter the path to save the hash file (leave empty to save in the selected folder): ")
+            if not hash_file:
+                hash_file = os.path.join("./", "video_hashes.json")
+            try:
+                save_hashes(folder_path, hash_file)
+                print(f"\033[92mHashes saved to {hash_file}\033[0m")
+                print('')
+            except Exception as e:
+                tb = e.__traceback__
+                error_message = f"Exception: {e} | "
+                while tb is not None:
+                    filename = tb.tb_frame.f_code.co_filename
+                    lineno = tb.tb_lineno
+                    function_name = tb.tb_frame.f_code.co_name
+                    error_message += f"File: {filename}, Line: {lineno}, in {function_name}\n"
+                    tb = tb.tb_next
+                open("log.txt", "a").write(f"{error_message}\n")
+                print("\033[91mAn error occurred. Please check log.txt for more details.\033[0m")
+                print('')
+
+        elif choice == '2':
+            hash_file = select_file(filetypes=[("JSON files", "*.json")])
+            new_video_path = select_file(filetypes=[("Video files", "*.mp4 *.avi *.mkv")])
+            original_video = find_original_video(new_video_path, hash_file)
+            if original_video:
+                print(f'\033[92mThe original video is: {original_video}\033[0m')
+                webbrowser.open(f'file://{original_video}')
+            else:
+                print("No matching video found.")
+        elif choice == '3':
+            break
+        else:
+            print("Invalid choice. Please try again.")
+
+if __name__ == "__main__":
+    main_menu()
