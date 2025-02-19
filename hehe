@@ -1,61 +1,112 @@
-def video_to_hashes(video_path, frame_interval=20):
-    cap = cv2.VideoCapture(video_path)
-    frame_hashes = []
+def get_video_frames(video_path, sample_rate=1):
+    frames = []
+    cap = cv2.VideoCapture(str(video_path))
     frame_count = 0
-
-    while cap.isOpened():
+    
+    while True:
         ret, frame = cap.read()
         if not ret:
             break
-
-        if frame_count % frame_interval == 0:
-            pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            frame_hash = imagehash.phash(pil_image)
-            frame_hashes.append(str(frame_hash))
-
+            
+        if frame_count % sample_rate == 0:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(frame_rgb)
+            frames.append(pil_image)
         frame_count += 1
-
+        
     cap.release()
-    return frame_hashes
+    return frames
 
-def compare_hashes(hashes1, hashes2, threshold=20):
-    matches = 0
-    for h1 in hashes1:
-        for h2 in hashes2:
-            if abs(int(h1, 16) - int(h2, 16)) < threshold:
-                matches += 1
-                break
-    return matches
+def calculate_video_hash(frames):
+    hashes = []
+    for frame in frames:
+        hash = imagehash.average_hash(frame)
+        hashes.append(hash)
+    return hashes
 
-def save_hashes(folder_path, hash_file):
+def compare_videos(source_video, target_folder, threshold=0.85):
+    source_frames = get_video_frames(source_video, sample_rate=30)
+    source_hashes = calculate_video_hash(source_frames)
+    
+    results = []
+    for video_file in Path(target_folder).glob("*.mp4"):
+        try:
+            target_frames = get_video_frames(video_file, sample_rate=30)
+            target_hashes = calculate_video_hash(target_frames)
+            matches = 0
+            comparisons = min(len(source_hashes), len(target_hashes))
+            
+            for i in range(comparisons):
+                similarity = 1 - (source_hashes[i] - target_hashes[i]) / len(source_hashes[i].hash) ** 2
+                if similarity > threshold:
+                    matches += 1
+            
+            match_percentage = matches / comparisons
+            results.append((video_file, match_percentage))
+            
+            print(f"So sánh với {video_file.name}: {match_percentage:.2%} match")
+            
+        except Exception as e:
+            print(f"Lỗi khi xử lý {video_file}: {str(e)}")
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results
+
+def save_video_hashes(folder_path, output_file="video_hashes.pkl"):
     video_hashes = {}
-    video_files = [f for f in os.listdir(folder_path) if f.endswith(('.mp4', '.avi', '.mkv'))]
-    for filename in tqdm(video_files, desc="Processing videos"):
-        video_path = os.path.join(folder_path, filename)
-        video_hashes[video_path] = video_to_hashes(video_path)
-    with open(hash_file, 'w') as f:
-        json.dump(video_hashes, f)
+    video_files = list(Path(folder_path).glob("*.mp4"))
+    
+    print(f"Tìm thấy {len(video_files)} video files")
+    
+    for video_file in tqdm(video_files, desc="Đang xử lý videos"):
+        try:
+            frames = get_video_frames(video_file, sample_rate=30)
+            hashes = calculate_video_hash(frames)
+            rel_path = str(video_file.relative_to(folder_path))
+            video_hashes[rel_path] = [str(h) for h in hashes]
+        except Exception as e:
+            print(f"\nLỗi khi xử lý {video_file.name}: {str(e)}")
+    
+    with open(output_file, 'wb') as f:
+        pickle.dump({'base_path': str(folder_path), 'hashes': video_hashes}, f)
+    
+    print(f"\nĐã lưu hash của {len(video_hashes)} videos vào {output_file}")
 
-def load_hashes(hash_file):
-    with open(hash_file, 'r') as f:
-        return json.load(f)
+def load_video_hashes(hash_file="video_hashes.pkl"):
+    with open(hash_file, 'rb') as f:
+        data = pickle.load(f)
+    base_path = Path(data['base_path'])
+    video_hashes = {}
+    for rel_path, hashes in data['hashes'].items():
+        video_hashes[base_path / rel_path] = [imagehash.hex_to_hash(h) for h in hashes]
+    
+    return video_hashes
 
-def find_original_video(new_video_path, hash_file):
-    new_video_hashes = video_to_hashes(new_video_path)
-    print(f'Hashes of the new video: {new_video_hashes}')
-    video_hashes = load_hashes(hash_file)
-
-    best_match = None
-    best_match_count = 0
-
-    for video_path, hashes in video_hashes.items():
-        print(f'Comparing {new_video_path} with {video_path}...')
-        match_count = compare_hashes(new_video_hashes, hashes)
-        if match_count > best_match_count:
-            best_match_count = match_count
-            best_match = video_path
-
-    return best_match
+def find_matching_video(source_video, hash_file="video_hashes.pkl", threshold=0.85):
+    source_frames = get_video_frames(source_video, sample_rate=30)
+    source_hashes = calculate_video_hash(source_frames)
+    
+    video_hashes = load_video_hashes(hash_file)
+    results = []
+    
+    for video_path, target_hashes in tqdm(video_hashes.items(), desc="Đang so sánh"):
+        try:
+            matches = 0
+            comparisons = min(len(source_hashes), len(target_hashes))
+            
+            for i in range(comparisons):
+                similarity = 1 - (source_hashes[i] - target_hashes[i]) / len(source_hashes[i].hash) ** 2
+                if similarity > threshold:
+                    matches += 1
+            
+            match_percentage = matches / comparisons
+            results.append((video_path, match_percentage))
+            
+        except Exception as e:
+            print(f"Lỗi khi so sánh với {video_path}: {str(e)}")
+    
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results
+init()
 
 def select_folder():
     root = tk.Tk()
@@ -63,72 +114,96 @@ def select_folder():
     folder_path = filedialog.askdirectory()
     return folder_path
 
-def select_file(filetypes, title):
+def select_file(file_types=(("Video files", "*.mp4"), ("All files", "*.*"))):
     root = tk.Tk()
     root.withdraw()
-    file_path = filedialog.askopenfilename(filetypes=filetypes, title=title)
+    file_path = filedialog.askopenfilename(filetypes=file_types)
     return file_path
 
-hash_file = ""
-def main_menu():
-    global hash_file
+def print_clickable_path(path, match_percentage, open_file=False):
+    file_url = f"file:///{os.path.abspath(path).replace(os.sep, '/')}"
+    # In với màu xanh và dễ nhìn
+    print(f"{Fore.GREEN}Match: {match_percentage:.2%}{Fore.RESET}")
+    print(f"Path: {Fore.BLUE}{path}{Fore.RESET}")
+    
+    # Chỉ mở file nếu được yêu cầu
+    if open_file:
+        webbrowser.open(file_url)
+
+# Sửa đổi hàm show_menu()
+CURRENT_HASH_FILE = "video_hashes.pkl"  # Giá trị mặc định
+
+def show_menu():
+    """Hiển thị menu tương tác."""
+    global CURRENT_HASH_FILE
+    
     while True:
-        print("Menu:")
-        print("1. Scan folder and save hashes")
-        print("2. Find original video")
-        print("3. Exit")
-        choice = input("Enter your choice: ")
-
-        if choice == '1':
+        print("\n=== MENU TÌM KIẾM VIDEO ===")
+        print("1. Tạo file hash từ folder video")
+        print("2. Tìm video gốc từ file video")
+        print(f"3. Đổi file data (hiện tại: {CURRENT_HASH_FILE})")
+        print("4. Thoát")
+        
+        choice = input("\nNhập lựa chọn của bạn (1-4): ")
+        
+        if choice == "1":
+            print("Chọn folder chứa videos...")
             folder_path = select_folder()
-            hash_file = input("Enter the path to save the hash file (leave empty to save in the selected folder): ")
-            if not hash_file:
-                hash_file = os.path.join("./", "video_hashes.json")
-            try:
-                save_hashes(folder_path, hash_file)
-                print(f"\033[92mHashes saved to {hash_file}\033[0m")
-                print('')
-            except Exception as e:
-                tb = e.__traceback__
-                error_message = f"Exception: {e} | "
-                while tb is not None:
-                    filename = tb.tb_frame.f_code.co_filename
-                    lineno = tb.tb_lineno
-                    function_name = tb.tb_frame.f_code.co_name
-                    error_message += f"File: {filename}, Line: {lineno}, in {function_name}\n"
-                    tb = tb.tb_next
-                open("log.txt", "a").write(f"{error_message}\n")
-                print("\033[91mAn error occurred. Please check log.txt for more details.\033[0m")
-                print('')
-
-        elif choice == '2':
-            while True:
-                print("Select the hash file and the new video to find the original video.")
-                print("1. Select the hash file")
-                print("2. Use the hash file from the previous step")
-                choice = input("Enter your choice: ")
-                if choice == '1':
-                    hash_file = select_file(filetypes=[("JSON files", "*.json")], title="Select the hash file")
-                    break
-                elif choice == '2':
-                    if not hash_file:
-                        print("\033[91mHash file not found. Please scan a folder first.\033[0m")
-                        continue
-                    break
-                else:
-                    print("Invalid choice. Please try again.")
-                    continue
-            new_video_path = select_file(filetypes=[("Video files", "*.mp4 *.avi *.mkv")], title="Select the new video")
-            original_video = find_original_video(new_video_path, hash_file)
-            if original_video:
-                print(f'\033[92mThe original video is: {original_video}\033[0m')
-                webbrowser.open(f'file://{original_video}')
+            if not folder_path: 
+                print("Đã hủy chọn folder!")
+                continue
+            if not os.path.exists(folder_path):
+                print("Đường dẫn không tồn tại!")
+                continue
+                
+            print("Chọn file để lưu hash...")
+            output_file = filedialog.asksaveasfilename(
+                defaultextension=".pkl",
+                filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
+                title="Chọn file để lưu hash"
+            )
+            if not output_file:
+                print("Đã hủy lưu file!")
+                continue
+                
+            save_video_hashes(folder_path, output_file)
+            CURRENT_HASH_FILE = output_file
+            
+        elif choice == "2":
+            print(f"Đang sử dụng file hash: {CURRENT_HASH_FILE}")
+            if not os.path.exists(CURRENT_HASH_FILE):
+                print("File hash không tồn tại! Vui lòng chọn file hash mới.")
+                continue
+                
+            print("Chọn video cần tìm...")
+            source_video = select_file()
+            if not source_video:
+                print("Đã hủy chọn video!")
+                continue
+            if not os.path.exists(source_video):
+                print("File video không tồn tại!")
+                continue
+                
+            results = find_matching_video(source_video, CURRENT_HASH_FILE)
+            
+            print("\nKết quả tìm kiếm (Top 5):")
+            for i, (video_path, match_percentage) in enumerate(results[:5]):
+                print_clickable_path(video_path, match_percentage, open_file=(i == 0))
+                
+        elif choice == "3":
+            print("Chọn file hash mới...")
+            new_hash_file = select_file(file_types=[("Pickle files", "*.pkl"), ("All files", "*.*")])
+            if new_hash_file and os.path.exists(new_hash_file):
+                CURRENT_HASH_FILE = new_hash_file
+                print(f"Đã đổi sang file hash mới: {CURRENT_HASH_FILE}")
             else:
-                print("No matching video found.")
-        elif choice == '3':
+                print("Không thay đổi file hash!")
+                
+        elif choice == "4":
+            print("Tạm biệt!")
             break
         else:
-            print("Invalid choice. Please try again.")
+            print("Lựa chọn không hợp lệ!")
 
 if __name__ == "__main__":
-    main_menu()
+    show_menu()
