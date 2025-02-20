@@ -31,7 +31,7 @@ def compare_videos(source_video, target_folder, threshold=0.85):
     results = []
     for video_file in Path(target_folder).glob("*.mp4"):
         try:
-            target_frames = get_video_frames(video_file, sample_rate=30)
+            target_frames = get_video_frames(video_file, sample_rate=10)
             target_hashes = calculate_video_hash(target_frames)
             matches = 0
             comparisons = min(len(source_hashes), len(target_hashes))
