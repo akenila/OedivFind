@@ -25,7 +25,7 @@ def calculate_video_hash(frames):
     return hashes
 
 def compare_videos(source_video, target_folder, threshold=0.85):
-    source_frames = get_video_frames(source_video, sample_rate=30)
+    source_frames = get_video_frames(source_video, sample_rate=10)
     source_hashes = calculate_video_hash(source_frames)
     
     results = []
@@ -59,7 +59,7 @@ def save_video_hashes(folder_path, output_file="video_hashes.pkl"):
     
     for video_file in tqdm(video_files, desc="Đang xử lý videos"):
         try:
-            frames = get_video_frames(video_file, sample_rate=30)
+            frames = get_video_frames(video_file, sample_rate=10)
             hashes = calculate_video_hash(frames)
             rel_path = str(video_file.relative_to(folder_path))
             video_hashes[rel_path] = [str(h) for h in hashes]
@@ -82,7 +82,7 @@ def load_video_hashes(hash_file="video_hashes.pkl"):
     return video_hashes
 
 def find_matching_video(source_video, hash_file="video_hashes.pkl", threshold=0.85):
-    source_frames = get_video_frames(source_video, sample_rate=30)
+    source_frames = get_video_frames(source_video, sample_rate=10)
     source_hashes = calculate_video_hash(source_frames)
     
     video_hashes = load_video_hashes(hash_file)
