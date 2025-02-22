@@ -1,209 +1,135 @@
-def get_video_frames(video_path, sample_rate=1):
+def get_video_frames(video_path, num_frames=10):
+    cap = cv2.VideoCapture(video_path)
     frames = []
-    cap = cv2.VideoCapture(str(video_path))
-    frame_count = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    step = max(1, total_frames // num_frames)
     
-    while True:
+    for i in range(0, total_frames, step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
         ret, frame = cap.read()
         if not ret:
             break
-            
-        if frame_count % sample_rate == 0:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_image = Image.fromarray(frame_rgb)
-            frames.append(pil_image)
-        frame_count += 1
-        
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+    
     cap.release()
     return frames
 
-def calculate_video_hash(frames):
-    hashes = []
+def extract_features(video_path, num_frames=10):
+    frames = get_video_frames(video_path, num_frames)
+    orb = cv2.ORB_create()
+    features = []
     for frame in frames:
-        hash = imagehash.average_hash(frame)
-        hashes.append(hash)
-    return hashes
+        kp, des = orb.detectAndCompute(frame, None)
+        features.append(des)
+    return features
 
-def compare_videos(source_video, target_folder, threshold=0.85):
-    source_frames = get_video_frames(source_video, sample_rate=10)
-    source_hashes = calculate_video_hash(source_frames)
+def save_features(folder_path, output_file):
+    video_features = {}
+    filenames = [f for f in os.listdir(folder_path) if f.endswith(('.mp4', '.avi', '.mkv'))]
     
-    results = []
-    for video_file in Path(target_folder).glob("*.mp4"):
-        try:
-            target_frames = get_video_frames(video_file, sample_rate=10)
-            target_hashes = calculate_video_hash(target_frames)
-            matches = 0
-            comparisons = min(len(source_hashes), len(target_hashes))
-            
-            for i in range(comparisons):
-                similarity = 1 - (source_hashes[i] - target_hashes[i]) / len(source_hashes[i].hash) ** 2
-                if similarity > threshold:
-                    matches += 1
-            
-            match_percentage = matches / comparisons
-            results.append((video_file, match_percentage))
-            
-            print(f"So sánh với {video_file.name}: {match_percentage:.2%} match")
-            
-        except Exception as e:
-            print(f"Lỗi khi xử lý {video_file}: {str(e)}")
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results
-
-def save_video_hashes(folder_path, output_file="video_hashes.pkl"):
-    video_hashes = {}
-    video_files = list(Path(folder_path).glob("*.mp4"))
-    
-    print(f"Tìm thấy {len(video_files)} video files")
-    
-    for video_file in tqdm(video_files, desc="Đang xử lý videos"):
-        try:
-            frames = get_video_frames(video_file, sample_rate=10)
-            hashes = calculate_video_hash(frames)
-            rel_path = str(video_file.relative_to(folder_path))
-            video_hashes[rel_path] = [str(h) for h in hashes]
-        except Exception as e:
-            print(f"\nLỗi khi xử lý {video_file.name}: {str(e)}")
+    for filename in tqdm(filenames, desc="Processing videos"):
+        video_path = os.path.join(folder_path, filename)
+        video_path = os.path.normpath(video_path).replace("\\", "/")  # Normalize and replace backslashes
+        features = extract_features(video_path, num_frames=50)
+        video_features[video_path] = features
     
     with open(output_file, 'wb') as f:
-        pickle.dump({'base_path': str(folder_path), 'hashes': video_hashes}, f)
-    
-    print(f"\nĐã lưu hash của {len(video_hashes)} videos vào {output_file}")
+        pickle.dump(video_features, f)
 
-def load_video_hashes(hash_file="video_hashes.pkl"):
-    with open(hash_file, 'rb') as f:
-        data = pickle.load(f)
-    base_path = Path(data['base_path'])
-    video_hashes = {}
-    for rel_path, hashes in data['hashes'].items():
-        video_hashes[base_path / rel_path] = [imagehash.hex_to_hash(h) for h in hashes]
-    
-    return video_hashes
+def compare_features(features1, features2):
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    total_diff = 0
+    count = 0
+    for des1, des2 in zip(features1, features2):
+        if des1 is None or des2 is None:
+            continue
+        matches = bf.match(des1, des2)
+        matches = sorted(matches, key=lambda x: x.distance)
+        total_diff += sum([match.distance for match in matches]) / len(matches)
+        count += 1
+    return total_diff / count if count > 0 else float('inf')
 
-def find_matching_video(source_video, hash_file="video_hashes.pkl", threshold=0.85):
-    source_frames = get_video_frames(source_video, sample_rate=10)
-    source_hashes = calculate_video_hash(source_frames)
+def find_similar_videos(new_video_path, features_file, top_n=5):
+    with open(features_file, 'rb') as f:
+        video_features = pickle.load(f)
     
-    video_hashes = load_video_hashes(hash_file)
-    results = []
+    new_video_features = extract_features(new_video_path, num_frames=50)
     
-    for video_path, target_hashes in tqdm(video_hashes.items(), desc="Đang so sánh"):
-        try:
-            matches = 0
-            comparisons = min(len(source_hashes), len(target_hashes))
-            
-            for i in range(comparisons):
-                similarity = 1 - (source_hashes[i] - target_hashes[i]) / len(source_hashes[i].hash) ** 2
-                if similarity > threshold:
-                    matches += 1
-            
-            match_percentage = matches / comparisons
-            results.append((video_path, match_percentage))
-            
-        except Exception as e:
-            print(f"Lỗi khi so sánh với {video_path}: {str(e)}")
+    similarities = []
+    for video_path, features in video_features.items():
+        print(f"Comparing with {video_path}")
+        diff = compare_features(new_video_features, features)
+        similarity = 100 - (diff / 100) * 100  # Convert to percentage
+        similarities.append((video_path, similarity))
     
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results
-init()
+    similarities.sort(key=lambda x: x[1], reverse=True)
+    return similarities[:top_n]
 
-def select_folder():
+
+def main():
     root = tk.Tk()
-    root.withdraw()
-    folder_path = filedialog.askdirectory()
-    return folder_path
+    root.withdraw()  # Hide the main window
 
-def select_file(file_types=(("Video files", "*.mp4"), ("All files", "*.*"))):
-    root = tk.Tk()
-    root.withdraw()
-    file_path = filedialog.askopenfilename(filetypes=file_types)
-    return file_path
-
-def print_clickable_path(path, match_percentage, open_file=False):
-    file_url = f"file:///{os.path.abspath(path).replace(os.sep, '/')}"
-    # In với màu xanh và dễ nhìn
-    print(f"{Fore.GREEN}Match: {match_percentage:.2%}{Fore.RESET}")
-    print(f"Path: {Fore.BLUE}{path}{Fore.RESET}")
-    
-    # Chỉ mở file nếu được yêu cầu
-    if open_file:
-        webbrowser.open(file_url)
-
-# Sửa đổi hàm show_menu()
-CURRENT_HASH_FILE = "video_hashes.pkl"  # Giá trị mặc định
-
-def show_menu():
-    """Hiển thị menu tương tác."""
-    global CURRENT_HASH_FILE
-    
+    features_file = "data.pkl"
     while True:
         print("\n=== MENU TÌM KIẾM VIDEO ===")
         print("1. Tạo file hash từ folder video")
         print("2. Tìm video gốc từ file video")
-        print(f"3. Đổi file data (hiện tại: {CURRENT_HASH_FILE})")
+        print(f"3. Đổi file data (hiện tại: {features_file})")
         print("4. Thoát")
         
         choice = input("\nNhập lựa chọn của bạn (1-4): ")
         
-        if choice == "1":
-            print("Chọn folder chứa videos...")
-            folder_path = select_folder()
-            if not folder_path: 
-                print("Đã hủy chọn folder!")
+        if choice == '1':
+            folder_path = filedialog.askdirectory(title="Chọn đường dẫn folder")
+            if not folder_path:
+                print("Không có folder nào được chọn.")
                 continue
-            if not os.path.exists(folder_path):
-                print("Đường dẫn không tồn tại!")
-                continue
-                
-            print("Chọn file để lưu hash...")
-            output_file = filedialog.asksaveasfilename(
-                defaultextension=".pkl",
-                filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
-                title="Chọn file để lưu hash"
-            )
+            output_file = filedialog.asksaveasfilename(defaultextension=".pkl", initialfile="data.pkl", title="Nhập đường dẫn file output")
             if not output_file:
-                print("Đã hủy lưu file!")
+                output_file = "data.pkl"
+            save_features(folder_path, output_file)
+            print(f"Dữ liệu đã được lưu vào {output_file}")
+        
+        elif choice == '2':
+            print(f"Đường dẫn file data: {features_file}")
+            new_video_path = filedialog.askopenfilename(title="Nhập đường dẫn video mới", filetypes=[("Video files", "*.mp4 *.avi *.mkv")])
+            if not new_video_path:
+                print("Không có video nào được chọn.")
                 continue
+            similar_videos = find_similar_videos(new_video_path, features_file)
+            print("Top 5 video gốc giống nhất:")
+            while True:
+                print("----------------------------------------------------")
+                for idx, (video_path, similarity) in enumerate(similar_videos, start=1):
+                    print(f"{idx}. \033[92m{video_path}\033[0m: \033[94m{similarity:.2f}%\033[0m")
+                print("6. Thoát")
+                print("----------------------------------------------------")
                 
-            save_video_hashes(folder_path, output_file)
-            CURRENT_HASH_FILE = output_file
-            
-        elif choice == "2":
-            print(f"Đang sử dụng file hash: {CURRENT_HASH_FILE}")
-            if not os.path.exists(CURRENT_HASH_FILE):
-                print("File hash không tồn tại! Vui lòng chọn file hash mới.")
-                continue
-                
-            print("Chọn video cần tìm...")
-            source_video = select_file()
-            if not source_video:
-                print("Đã hủy chọn video!")
-                continue
-            if not os.path.exists(source_video):
-                print("File video không tồn tại!")
-                continue
-                
-            results = find_matching_video(source_video, CURRENT_HASH_FILE)
-            
-            print("\nKết quả tìm kiếm (Top 5):")
-            for i, (video_path, match_percentage) in enumerate(results[:5]):
-                print_clickable_path(video_path, match_percentage, open_file=(i == 0))
-                
-        elif choice == "3":
-            print("Chọn file hash mới...")
-            new_hash_file = select_file(file_types=[("Pickle files", "*.pkl"), ("All files", "*.*")])
-            if new_hash_file and os.path.exists(new_hash_file):
-                CURRENT_HASH_FILE = new_hash_file
-                print(f"Đã đổi sang file hash mới: {CURRENT_HASH_FILE}")
-            else:
-                print("Không thay đổi file hash!")
-                
-        elif choice == "4":
-            print("Tạm biệt!")
+                video_choice = input("Nhập số của video bạn muốn mở (1-6): ")
+                try:
+                    video_choice = int(video_choice)
+                    if 1 <= video_choice <= len(similar_videos):
+                        if video_choice == 6:
+                            break
+                        webbrowser.open(f"file://{similar_videos[video_choice - 1][0]}")
+                    else:
+                        print("Lựa chọn không hợp lệ.")
+                except ValueError:
+                    print("Lựa chọn không hợp lệ.")
+        
+        elif choice == '3':
+            print("Chọn file data mới.")
+            features_file = filedialog.askopenfilename(defaultextension=".pkl", initialfile="data.pkl", title="Nhập đường dẫn file data", filetypes=[("Pickle files", "*.pkl")])
+            if not features_file:
+                features_file = "data.pkl"
+            print(f"Đường dẫn file data đã được đặt thành {features_file}")
+        
+        elif choice == '4':
             break
+        
         else:
-            print("Lựa chọn không hợp lệ!")
+            print("Lựa chọn không hợp lệ. Vui lòng thử lại.")
 
 if __name__ == "__main__":
-    show_menu()
+    main()
