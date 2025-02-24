@@ -109,7 +109,7 @@ def main():
                 video_choice = input("Nhập số của video bạn muốn mở (1-6): ")
                 try:
                     video_choice = int(video_choice)
-                    if 1 <= video_choice <= len(similar_videos):
+                    if 1 <= video_choice <= len(similar_videos)+1:
                         if video_choice == 6:
                             break
                         webbrowser.open(f"file://{similar_videos[video_choice - 1][0]}")
