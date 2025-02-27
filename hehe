@@ -30,7 +30,7 @@ def save_features(folder_path, output_file):
     for filename in tqdm(filenames, desc="Processing videos"):
         video_path = os.path.join(folder_path, filename)
         video_path = os.path.normpath(video_path).replace("\\", "/")  # Normalize and replace backslashes
-        features = extract_features(video_path, num_frames=100)
+        features = extract_features(video_path, num_frames=70)
         video_features[video_path] = features
     
     with open(output_file, 'wb') as f:
@@ -53,7 +53,7 @@ def find_similar_videos(new_video_path, features_file, top_n=5):
     with open(features_file, 'rb') as f:
         video_features = pickle.load(f)
     
-    new_video_features = extract_features(new_video_path, num_frames=100)
+    new_video_features = extract_features(new_video_path, num_frames=70)
     
     similarities = []
     for video_path, features in video_features.items():
